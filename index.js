@@ -64,15 +64,46 @@ async function run() {
 			res.send({ token });
 		});
 
-		app.get('/total-ticket', async (req, res) => {
+		// get role
+		app.get("/get-user-role", async (req, res) => {
 			const email = req.query.email;
-			
-			const query = {email}
-			const totalTicket = await ticketCollection.countDocuments(query)
-			console.log(totalTicket);
-			res.send({totalTicket});
-			
+			const query = { email };
+			const result = await userCollection.findOne(query);
+			if (result.role === "admin") {
+				return res.send('admin');
+			}
+			res.send('user');
+		});
+
+		// update user role 
+		app.put('/update-user-role', verifyJWT, async (req, res) => {
+			const id = req.query.id;
+			const query = { _id: new ObjectId(id) };
+			const options = { upsert: true };
+			const updateDoc = {
+				$set: {role: 'admin'}
+			}
+			const result = await userCollection.updateOne(query, updateDoc, options)
+
+			res.send(result)
 		})
+
+
+		// get all user
+		app.get('/get-all-user', async (req, res) => {
+			const result = await userCollection.find().toArray();
+
+			res.send(result)
+		})
+		// total ticket
+		app.get("/total-ticket", async (req, res) => {
+			const email = req.query.email;
+
+			const query = { email };
+			const totalTicket = await ticketCollection.countDocuments(query);
+			console.log(totalTicket);
+			res.send({ totalTicket });
+		});
 
 		// create new user when sing up or sing in
 		app.post("/create_user", async (req, res) => {
@@ -93,7 +124,7 @@ async function run() {
 		app.post(`/create-ticket`, verifyJWT, async (req, res) => {
 			const ticket = req.body;
 
-			console.log(ticket, ' cit')
+			console.log(ticket, " cit");
 			// to make ticket nlumber
 			let totalTicket = await ticketCollection.estimatedDocumentCount();
 			if (totalTicket < 9) {
@@ -127,10 +158,10 @@ async function run() {
 			res.send(result);
 		});
 
-		// get all tickes by user 
+		// get all tickes by user
 		app.get("/get-user-ticket", verifyJWT, async (req, res) => {
 			const email = req.query.email;
-			
+
 			if (email !== req.decoded.email) {
 				return res
 					.status(403)
@@ -154,7 +185,7 @@ async function run() {
 			res.send(singleTicket);
 		});
 
-		// get ticket status 
+		// get ticket status
 		app.get("/ticket-status", verifyJWT, async (req, res) => {
 			const email = req.query.email;
 			if (email !== req.decoded.email) {
@@ -168,7 +199,7 @@ async function run() {
 			if (isAdmin.role === "admin") {
 				const openStatusResult = await ticketCollection
 					.aggregate([
-						{ $match: {  status: "Open" } },
+						{ $match: { status: "Open" } },
 						{ $group: { _id: "$status", count: { $sum: 1 } } },
 					])
 					.toArray();
@@ -201,7 +232,7 @@ async function run() {
 				// in progress
 				const inprogressStatusResult = await ticketCollection
 					.aggregate([
-						{ $match: {  status: "In Progress" } },
+						{ $match: { status: "In Progress" } },
 						{ $group: { _id: "$status", count: { $sum: 1 } } },
 					])
 					.toArray();
@@ -210,7 +241,6 @@ async function run() {
 					.aggregate([
 						{
 							$match: {
-								
 								priority: "high",
 								status: "In Progress",
 							},
@@ -230,7 +260,6 @@ async function run() {
 					.aggregate([
 						{
 							$match: {
-								
 								priority: "high",
 								status: "Close",
 							},
@@ -250,7 +279,6 @@ async function run() {
 					closeHighStatusRestult,
 				});
 			}
-
 
 			const openStatusResult = await ticketCollection
 				.aggregate([
@@ -324,6 +352,18 @@ async function run() {
 				closeStatusResult,
 				closeHighStatusRestult,
 			});
+		});
+
+		app.put("/response-ticket", async (req, res) => {
+			const id = req.query.id;
+			const respons = req.body;
+			const query = { _id: new ObjectId(id) }
+			const options = { upsert: true };
+			const updateDoc = {
+				$push: { description: respons },
+			};
+			const result = await ticketCollection.updateOne(query, updateDoc, options);
+			res.send(result);
 		});
 
 		// Send a ping to confirm a successful connection
