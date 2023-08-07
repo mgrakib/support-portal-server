@@ -18,7 +18,7 @@ const verifyJWT = (req, res, next) => {
 	if (!authorization) {
 		return res
 			.status(401)
-			.send({ error: true, message: "Unauthorized Access" });
+			.send({ error: true, message: "Unauthorized Access first check" });
 	}
 	const token = authorization.split(" ")[1];
 
@@ -26,7 +26,7 @@ const verifyJWT = (req, res, next) => {
 		if (error) {
 			return res
 				.status(401)
-				.send({ error: true, message: "Unauthorized Access" });
+				.send({ error: true, message: "Unauthorized Access second check" });
 		}
 		req.decoded = decoded;
 		next();
@@ -47,13 +47,18 @@ const client = new MongoClient(uri, {
 async function run() {
 	try {
 		// Connect the client to the server	(optional starting in v4.7)
-		await client.connect();
+		// await client.connect();
 
 		const userCollection = client.db("supportSystem").collection("users");
 		const ticketCollection = client
 			.db("supportSystem")
 			.collection("ticket");
 
+		const indexKeys = { ticketID: 1, date: 1 };
+		const indexOptions = { name: "idBy" };
+
+		const result = await ticketCollection.createIndex(indexKeys, indexOptions)
+		
 		// jwt token
 		app.post("/jwt-token", async (req, res) => {
 			const body = req.body;
@@ -64,12 +69,41 @@ async function run() {
 			res.send({ token });
 		});
 
+
+		// app.get("/getJobsByText/:text", async (req, res) => {
+		// 	const text = req.params.text;
+		// 	const result = await jobsCollection
+		// 		.find({
+		// 			$or: [
+		// 				{ title: { $regex: text, $options: "i" } },
+		// 				{ category: { $regex: text, $options: "i" } },
+		// 			],
+		// 		})
+		// 		.toArray();
+		// 	res.send(result);
+		// });
+
+
+		app.get('/get-ticket-search/:searchText', async (req, res) => {
+			const searchText = req.params.searchText;
+			const result = await ticketCollection
+				.find({
+					$or: [
+						{ ticketID: { $regex: searchText, $options: "i" } },
+						{ date: { $regex: searchText, $options: "i" } },
+					],
+				})
+				.toArray();
+			
+			res.send(result);
+		})
+
 		// get role
 		app.get("/get-user-role", async (req, res) => {
 			const email = req.query.email;
 			const query = { email };
 			const result = await userCollection.findOne(query);
-			if (result.role === "admin") {
+			if (result?.role === "admin") {
 				return res.send('admin');
 			}
 			res.send('user');
@@ -100,8 +134,15 @@ async function run() {
 			const email = req.query.email;
 
 			const query = { email };
+
+			const isAdmin = await userCollection.findOne(query);
+			if (isAdmin?.role === 'admin') {
+				const totalTicket = await ticketCollection.countDocuments();	
+				return res.send({totalTicket})
+			}
+
 			const totalTicket = await ticketCollection.countDocuments(query);
-			console.log(totalTicket);
+			
 			res.send({ totalTicket });
 		});
 
@@ -110,21 +151,21 @@ async function run() {
 			const userInfo = req.body;
 			const query = { email: userInfo.email };
 			const isExist = await userCollection.findOne(query);
-			console.log(isExist);
+			
 			if (isExist) {
 				return res.send({});
 			}
 			const storedUser = await userCollection.insertOne(userInfo);
 
-			console.log(storedUser);
+			
 			res.send(storedUser);
 		});
 
 		// create ticket
-		app.post(`/create-ticket`, verifyJWT, async (req, res) => {
+		app.post(`/create-ticket`,  async (req, res) => {
 			const ticket = req.body;
 
-			console.log(ticket, " cit");
+			
 			// to make ticket nlumber
 			let totalTicket = await ticketCollection.estimatedDocumentCount();
 			if (totalTicket < 9) {
@@ -142,7 +183,7 @@ async function run() {
 			}
 			let month = ticketDate.getMonth() + 1;
 			if (month < 10) {
-				console.log("first");
+				
 				month = `0${month}`;
 			}
 			const year = ticketDate.getFullYear() % 100;
@@ -161,24 +202,28 @@ async function run() {
 		// get all tickes by user
 		app.get("/get-user-ticket", verifyJWT, async (req, res) => {
 			const email = req.query.email;
-
-			if (email !== req.decoded.email) {
-				return res
-					.status(403)
-					.send({ error: true, message: "Forbidden Access" });
-			}
+			const limite = req.query.limite;
+			const skip = req.query.skip;			
 			const isAdmin = await userCollection.findOne({ email });
-			if (isAdmin.role === "admin") {
-				const tikets = await ticketCollection.find().toArray();
+			if (isAdmin?.role === "admin") {
+				const tikets = await ticketCollection
+					.find()
+					.limit(parseInt(limite))
+					.skip(parseInt(skip * limite))
+					.toArray();
 				return res.send(tikets);
 			}
 			const query = { email };
-			const tikets = await ticketCollection.find(query).toArray();
+			const tikets = await ticketCollection
+				.find(query)
+				.limit(parseInt(limite))
+				.skip(parseInt(skip * limite))
+				.toArray();
 			res.send(tikets);
 		});
 
 		// get single ticket
-		app.get("/get-single-ticket/:id", verifyJWT, async (req, res) => {
+		app.get("/get-single-ticket/:id", async (req, res) => {
 			const id = req.params.id;
 			const query = { _id: new ObjectId(id) };
 			const singleTicket = await ticketCollection.findOne(query);
@@ -188,15 +233,16 @@ async function run() {
 		// get ticket status
 		app.get("/ticket-status", verifyJWT, async (req, res) => {
 			const email = req.query.email;
-			if (email !== req.decoded.email) {
-				return res
-					.status(403)
-					.send({ error: true, message: "Forbidden Access" });
-			}
+			// if (email !== req.decoded.email) {
+			// 	return res
+			// 		.status(403)
+			// 		.send({ error: true, message: "Forbidden Access" });
+			// }
 
 			const isAdmin = await userCollection.findOne({ email });
 
-			if (isAdmin.role === "admin") {
+			// =========if user is admin ==========
+			if (isAdmin?.role === "admin") {
 				const openStatusResult = await ticketCollection
 					.aggregate([
 						{ $match: { status: "Open" } },
@@ -280,6 +326,8 @@ async function run() {
 				});
 			}
 
+			// =========== if not user ===========
+			// open
 			const openStatusResult = await ticketCollection
 				.aggregate([
 					{ $match: { email, status: "Open" } },
@@ -287,19 +335,22 @@ async function run() {
 				])
 				.toArray();
 
+			// open and high
 			const openHighStatusRestult = await ticketCollection
 				.aggregate([
 					{ $match: { email, priority: "high", status: "Open" } },
 					{ $group: { _id: "$status", count: { $sum: 1 } } },
 				])
 				.toArray();
+
+			// ============ answered  ==============
 			const answeredStatusResult = await ticketCollection
 				.aggregate([
 					{ $match: { email, status: "Answered" } },
 					{ $group: { _id: "$status", count: { $sum: 1 } } },
 				])
 				.toArray();
-
+			// answered and high
 			const answeredHighStatusRestult = await ticketCollection
 				.aggregate([
 					{ $match: { email, priority: "high", status: "Answered" } },
@@ -307,14 +358,14 @@ async function run() {
 				])
 				.toArray();
 
-			// in progress
+			//  ==========in progress  =============
 			const inprogressStatusResult = await ticketCollection
 				.aggregate([
 					{ $match: { email, status: "In Progress" } },
 					{ $group: { _id: "$status", count: { $sum: 1 } } },
 				])
 				.toArray();
-
+			// inprogress and high
 			const inprogressHighStatusRestult = await ticketCollection
 				.aggregate([
 					{
@@ -328,6 +379,8 @@ async function run() {
 				])
 				.toArray();
 			// close
+
+			//  ==========close  =============
 			const closeStatusResult = await ticketCollection
 				.aggregate([
 					{ $match: { email, status: "Close" } },
@@ -335,6 +388,7 @@ async function run() {
 				])
 				.toArray();
 
+			// close and high 
 			const closeHighStatusRestult = await ticketCollection
 				.aggregate([
 					{ $match: { email, priority: "high", status: "Close" } },
